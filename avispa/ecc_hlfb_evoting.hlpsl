@@ -1,0 +1,139 @@
+% ECC-HLFB-eVOTING: AVISPA HLPSL model
+% Models candidate/voter registration, vote casting, ordering and commit validation.
+% Run: avispa ecc_hlfb_evoting.hlpsl --ofmc
+%      avispa ecc_hlfb_evoting.hlpsl --atse
+
+role candidate(C,E,O: agent,
+               Kce,Keo: symmetric_key,
+               H: hash_func,
+               SND,RCV: channel(dy))
+played_by C def=
+  local State: nat,
+        EnrIdCD, CSymb, CACD, CAE, CAO, T1, T2, T3, TrnCID, CLSt, CD_Rcon: text
+  init State := 0
+  transition
+    1. State = 0 /\ RCV(start) =|>
+       State' := 1 /\
+       SND({EnrIdCD.CSymb.CACD.T1}_Kce)
+       /\ secret(EnrIdCD, sec_candidate_identity, {C,E})
+    2. State = 1 /\ RCV({TrnCID.EnrIdCD.CD_Rcon}_Kce) =|>
+       State' := 2 /\ request(C,E,candidate_registered,TrnCID)
+end role
+
+role voter(V,E,O,F: agent,
+           Kve,Keo,Sk,Kof: symmetric_key,
+           H: hash_func,
+           SND,RCV: channel(dy))
+played_by V def=
+  local State: nat,
+        HV, RV, Fp, CAV, CAE, TS5, TS6, TrVID, ChId, ConId, RO, PV_Rcon: text,
+        EnrIdCD, CSymb, VoteTime, Oi, TSKV, CLS: text
+  init State := 0
+  transition
+    1. State = 0 /\ RCV(start) =|>
+       State' := 1 /\
+       SND({HV.RV.Fp.CAV.TS5}_Kve)
+       /\ secret(HV, sec_voter_pseudonym, {V,E,O})
+    2. State = 1 /\ RCV({HV.RO.TrVID.ChId.ConId.PV_Rcon}_Kve) =|>
+       State' := 2 /\ request(V,E,voter_registered,TrVID)
+    3. State = 2 /\ RCV(ready_vote) =|>
+       State' := 3 /\
+       SND({HV.RV.Fp.TrVID.ChId.ConId.TSKV}_Sk)
+    4. State = 3 /\ RCV({TrVID.CLS.EnrIdCD.Oi.TSKV}_Sk) =|>
+       State' := 4 /\
+       SND({TrVID.HV.EnrIdCD.CSymb.VoteTime.Oi}_Sk)
+       /\ witness(V,O,vote_cast,HV)
+       /\ secret(CSymb, sec_vote_choice, {V,O,F})
+end role
+
+role endorser(C,V,E,O: agent,
+              Kce,Kve,Keo: symmetric_key,
+              H: hash_func,
+              SND,RCV: channel(dy))
+played_by E def=
+  local State: nat,
+        EnrIdCD, CSymb, CACD, CAE, T1, T2, TrnCID, CLSt, CAO, T3, CD_Rcon: text,
+        HV, RV, Fp, CAV, TS5, TS6, Ei, RO, TrVID, ChId, ConId, PV_Rcon: text
+  init State := 0
+  transition
+    1. State = 0 /\ RCV({EnrIdCD.CSymb.CACD.T1}_Kce) =|>
+       State' := 1 /\ SND({EnrIdCD.CSymb.CAE.CACD.T2}_Keo)
+    2. State = 1 /\ RCV({TrnCID.CLSt.CAO.T3}_Keo) =|>
+       State' := 2 /\ SND({TrnCID.EnrIdCD.CD_Rcon}_Kce)
+       /\ witness(E,C,candidate_registered,TrnCID)
+    3. State = 2 /\ RCV({HV.RV.Fp.CAV.TS5}_Kve) =|>
+       State' := 3 /\ SND({HV.RV.Fp.Ei.CAE.TS6}_Keo)
+    4. State = 3 /\ RCV({HV.RO.TrVID.ChId.ConId.PV_Rcon}_Keo) =|>
+       State' := 4 /\ SND({HV.RO.TrVID.ChId.ConId.PV_Rcon}_Kve)
+       /\ witness(E,V,voter_registered,TrVID)
+end role
+
+role orderer(V,E,O,F: agent,
+             Keo,Sk,Kof: symmetric_key,
+             H: hash_func,
+             SND,RCV: channel(dy))
+played_by O def=
+  local State: nat,
+        EnrIdCD, CSymb, CAE, CACD, T2, TrnCID, CLSt, CAO, T3: text,
+        HV, RV, Fp, Ei, TS6, RO, TrVID, ChId, ConId, PV_Rcon, TSKV, Oi: text,
+        VoteTime, BLK, BLKTime, BLTval, VLt, WState: text
+  init State := 0
+  transition
+    1. State = 0 /\ RCV({EnrIdCD.CSymb.CAE.CACD.T2}_Keo) =|>
+       State' := 1 /\ SND({TrnCID.CLSt.CAO.T3}_Keo)
+    2. State = 1 /\ RCV({HV.RV.Fp.Ei.CAE.TS6}_Keo) =|>
+       State' := 2 /\ SND({HV.RO.TrVID.ChId.ConId.PV_Rcon}_Keo)
+    3. State = 2 /\ RCV({HV.RV.Fp.TrVID.ChId.ConId.TSKV}_Sk) =|>
+       State' := 3 /\ SND({TrVID.CLSt.EnrIdCD.Oi.TSKV}_Sk)
+    4. State = 3 /\ RCV({TrVID.HV.EnrIdCD.CSymb.VoteTime.Oi}_Sk) =|>
+       State' := 4 /\ SND({BLK.BLKTime.BLTval.CAO.VLt.CLSt.CACD.WState}_Kof)
+       /\ request(O,V,vote_cast,HV)
+end role
+
+role committer(O,F: agent,
+               Kof: symmetric_key,
+               H: hash_func,
+               SND,RCV: channel(dy))
+played_by F def=
+  local State: nat,
+        BLK, BLKTime, BLTval, CAO, VLt, CLSt, CACD, WState: text,
+        BlkChain, Result, WinEnrIdCD, CSymb, ResultDate, ResultTime, CAF: text
+  init State := 0
+  transition
+    1. State = 0 /\ RCV({BLK.BLKTime.BLTval.CAO.VLt.CLSt.CACD.WState}_Kof) =|>
+       State' := 1 /\ SND({BlkChain.Result.WinEnrIdCD.CSymb.ResultDate.ResultTime.CAF}_Kof)
+end role
+
+role session(C,V,E,O,F: agent,
+             Kce,Kve,Keo,Sk,Kof: symmetric_key,
+             H: hash_func) def=
+  local S1,R1,S2,R2,S3,R3,S4,R4,S5,R5: channel(dy)
+  composition
+    candidate(C,E,O,Kce,Keo,H,S1,R1)
+  /\ voter(V,E,O,F,Kve,Keo,Sk,Kof,H,S2,R2)
+  /\ endorser(C,V,E,O,Kce,Kve,Keo,H,S3,R3)
+  /\ orderer(V,E,O,F,Keo,Sk,Kof,H,S4,R4)
+  /\ committer(O,F,Kof,H,S5,R5)
+end role
+
+role environment() def=
+  const c,v,e,o,f: agent,
+        kce,kve,keo,sk,kof: symmetric_key,
+        h: hash_func,
+        sec_candidate_identity, sec_voter_pseudonym, sec_vote_choice: protocol_id,
+        candidate_registered, voter_registered, vote_cast: protocol_id
+  intruder_knowledge = {c,v,e,o,f,h}
+  composition
+    session(c,v,e,o,f,kce,kve,keo,sk,kof,h)
+end role
+
+goal
+  secrecy_of sec_candidate_identity
+  secrecy_of sec_voter_pseudonym
+  secrecy_of sec_vote_choice
+  authentication_on candidate_registered
+  authentication_on voter_registered
+  authentication_on vote_cast
+end goal
+
+environment()
